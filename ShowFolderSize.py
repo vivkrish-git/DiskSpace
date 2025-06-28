@@ -2,6 +2,7 @@ import os
 import tkinter as tk
 from tkinter import ttk
 from tkinter import filedialog
+import threading
 
 def get_folder_size(path):
     """Recursively calculates total size of folder in bytes, skipping symlinks."""
@@ -26,27 +27,27 @@ def human_readable_size(size, decimal_places=1):
     return f"{size:.{decimal_places}f} PB"
 
 def populate_tree(tree, parent, path):
-    entries = []
-    for entry in os.listdir(path):
-        abs_path = os.path.join(path, entry)
-        if os.path.isdir(abs_path):
-            size = get_folder_size(abs_path)
-        else:
-            try:
-                size = os.path.getsize(abs_path)
-            except Exception:
-                size = 0
-        entries.append((entry, abs_path, size))
-
-    # Sort by size, largest first
-    entries.sort(key=lambda x: x[2], reverse=True)
-
-    for entry, abs_path, size in entries:
-        display_name = f"{entry} ({human_readable_size(size)})"
-        node = tree.insert(parent, 'end', text=display_name, open=False, values=[abs_path])
-        if os.path.isdir(abs_path):
-            # Add a dummy child so the expand arrow appears
-            tree.insert(node, 'end', text='Loading...')
+    def worker():
+        entries = []
+        for entry in os.listdir(path):
+            abs_path = os.path.join(path, entry)
+            if os.path.isdir(abs_path):
+                size = get_folder_size(abs_path)
+            else:
+                try:
+                    size = os.path.getsize(abs_path)
+                except Exception:
+                    size = 0
+            entries.append((entry, abs_path, size))
+        entries.sort(key=lambda x: x[2], reverse=True)
+        def insert_entries():
+            for entry, abs_path, size in entries:
+                display_name = f"{entry} ({human_readable_size(size)})"
+                node = tree.insert(parent, 'end', text=display_name, open=False, values=[abs_path])
+                if os.path.isdir(abs_path):
+                    tree.insert(node, 'end', text='Loading...')
+        tree.after(0, insert_entries)
+    threading.Thread(target=worker, daemon=True).start()
 
 def on_open(event):
     node = tree.focus()
@@ -64,10 +65,15 @@ def choose_directory():
     print(f"Selected directory: {selected_dir}")
     if selected_dir:
         tree.delete(*tree.get_children())  # Clear existing
-        # Show the selected directory as the root node
-        display_name = f"{os.path.basename(selected_dir) or selected_dir} ({human_readable_size(get_folder_size(selected_dir))})"
-        root_node = tree.insert('', 'end', text=display_name, open=True, values=[selected_dir])
-        populate_tree(tree, root_node, selected_dir)
+
+        def worker():
+            size = get_folder_size(selected_dir)
+            display_name = f"{os.path.basename(selected_dir) or selected_dir} ({human_readable_size(size)})"
+            def insert_root():
+                root_node = tree.insert('', 'end', text=display_name, open=True, values=[selected_dir])
+                populate_tree(tree, root_node, selected_dir)
+            tree.after(0, insert_root)
+        threading.Thread(target=worker, daemon=True).start()
 
 # GUI setup
 root = tk.Tk()
